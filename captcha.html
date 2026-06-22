@@ -13,17 +13,18 @@
       margin: 0; min-height: 100vh;
       background: #1f2937; color: #f9faf8;
       display: flex; flex-direction: column; align-items: center;
-      justify-content: center; text-align: center; gap: 24px; padding: 24px;
+      justify-content: center; text-align: center; gap: 18px; padding: 24px;
     }
     h1 { margin: 0; font-size: 22px; }
-    p { margin: 0; color: #cbd5e1; max-width: 420px; line-height: 1.5; }
+    p { margin: 0; color: #cbd5e1; max-width: 440px; line-height: 1.5; }
     .h-captcha { min-height: 94px; }
-    #out { display: none; flex-direction: column; gap: 12px; width: 100%; max-width: 440px; align-items: center; }
+    #status { font-size: 13px; font-family: monospace; padding: 6px 10px; border-radius: 8px; background: #111827; }
+    .ok { color: #6ee7b7; } .bad { color: #fca5a5; }
+    #out { display: none; flex-direction: column; gap: 12px; width: 100%; max-width: 460px; align-items: center; }
     textarea {
       width: 100%; height: 110px; box-sizing: border-box;
       background: #111827; color: #a7f3d0; border: 1px solid #374151;
-      border-radius: 10px; padding: 12px; font-family: monospace; font-size: 12px;
-      resize: none;
+      border-radius: 10px; padding: 12px; font-family: monospace; font-size: 12px; resize: none;
     }
     button {
       background: #047857; color: #f9faf8; border: none;
@@ -37,12 +38,13 @@
 </head>
 <body>
   <h1>🔐 Реши капчу Riot</h1>
-  <p>Отметь галочку (и реши задание, если попросит). Затем скопируй появившийся код и пришли его боту в Telegram.</p>
+  <p>Отметь галочку (и реши задание, если попросит). Затем скопируй появившийся код и пришли его боту.</p>
 
+  <div id="status">инициализация…</div>
   <div id="cap"></div>
 
   <div id="out">
-    <span id="ok">✅ Капча решена! Скопируй код ниже и отправь боту:</span>
+    <span id="ok">✅ Капча решена! Скопируй код и отправь боту:</span>
     <textarea id="token" readonly></textarea>
     <button id="copy">📋 Скопировать код</button>
   </div>
@@ -50,43 +52,70 @@
   <p id="err"></p>
 
   <script>
-    function params() {
-      // Параметры приходят в #hash (не в query) — так они не попадают в логи/реферер.
-      return new URLSearchParams(location.hash.slice(1));
+    // sitekey и rqdata кладём в #hash (а на всякий случай поддержим и ?query).
+    function readParams() {
+      var fromHash = new URLSearchParams(location.hash.slice(1));
+      var fromQuery = new URLSearchParams(location.search.slice(1));
+      var get = function (k) { return fromHash.get(k) || fromQuery.get(k); };
+      return { sitekey: get('sitekey'), rqdata: get('rqdata') };
     }
 
+    function setStatus(text, good) {
+      var s = document.getElementById('status');
+      s.textContent = text;
+      s.className = good ? 'ok' : 'bad';
+    }
     function showError(msg) {
       var e = document.getElementById('err');
       e.textContent = '⚠️ ' + msg;
       e.style.display = 'block';
     }
-
     function onSolve(token) {
       document.getElementById('token').value = token;
       document.getElementById('ok').style.display = 'block';
       document.getElementById('out').style.display = 'flex';
     }
 
-    // Вызывается, когда загрузился скрипт hCaptcha.
+    // Привязываем rqdata к виджету. У hCaptcha капризная сигнатура setData,
+    // поэтому пробуем все известные формы — какая-нибудь да сработает.
+    function applyRqdata(id, rqdata) {
+      var forms = [
+        function () { hcaptcha.setData(id, { rqdata: rqdata }); },
+        function () { hcaptcha.setData({ rqdata: rqdata }); },
+        function () { hcaptcha.setData('', { rqdata: rqdata }); }
+      ];
+      var okCount = 0;
+      for (var i = 0; i < forms.length; i++) {
+        try { forms[i](); okCount++; } catch (e) { /* эта форма не подошла */ }
+      }
+      return okCount;
+    }
+
     window.onHcaptchaLoad = function () {
-      var p = params();
-      var sitekey = p.get('sitekey');
-      var rqdata = p.get('rqdata');
-      if (!sitekey) {
-        showError('Ссылка неполная (нет sitekey). Открой ссылку, которую прислал бот, целиком.');
+      var p = readParams();
+      if (!p.sitekey) {
+        setStatus('НЕТ sitekey в ссылке', false);
+        showError('Открой именно ту ссылку, что прислал бот, целиком (в ней есть #sitekey=...&rqdata=...).');
+        return;
+      }
+      if (!p.rqdata) {
+        setStatus('НЕТ rqdata в ссылке', false);
+        showError('В ссылке нет rqdata — без него Riot капчу не примет. Скопируй ссылку от бота целиком.');
         return;
       }
       try {
         var id = hcaptcha.render('cap', {
-          sitekey: sitekey,
+          sitekey: p.sitekey,
           theme: 'dark',
           callback: onSolve,
-          'error-callback': function () { showError('Ошибка hCaptcha. Обнови страницу и попробуй ещё раз.'); },
-          'expired-callback': function () { showError('Капча истекла. Обнови страницу.'); }
+          'error-callback': function () { showError('Ошибка hCaptcha. Обнови страницу.'); },
+          'expired-callback': function () { showError('Капча истекла. Обнови страницу и реши заново.'); }
         });
-        // rqdata — challenge от Riot, привязывает капчу к конкретной попытке входа.
-        if (rqdata) hcaptcha.setData(id, { rqdata: rqdata });
+        var applied = applyRqdata(id, p.rqdata);
+        setStatus('rqdata получен (' + p.rqdata.length + ' симв.), привязан ✓', true);
+        if (!applied) showError('Не удалось привязать rqdata (setData). Сообщи об этом.');
       } catch (e) {
+        setStatus('ошибка рендера', false);
         showError('Не удалось показать капчу: ' + e.message);
       }
     };
@@ -101,9 +130,7 @@
       };
       if (navigator.clipboard) {
         navigator.clipboard.writeText(ta.value).then(done, function () { document.execCommand('copy'); done(); });
-      } else {
-        document.execCommand('copy'); done();
-      }
+      } else { document.execCommand('copy'); done(); }
     };
   </script>
 </body>
