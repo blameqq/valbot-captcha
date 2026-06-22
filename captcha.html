@@ -36,10 +36,11 @@
 </head>
 <body>
   <h1>🔐 Реши капчу Riot</h1>
-  <p>Отметь галочку (и реши задание, если попросит). Затем скопируй появившийся код и пришли его боту.</p>
+  <p>Нажми «Решить капчу» (и реши задание, если попросит). Затем скопируй появившийся код и пришли его боту.</p>
 
   <div id="status">инициализация…</div>
   <div id="capwrap"></div>
+  <button id="solve" style="display:none">🧩 Решить капчу</button>
 
   <div id="out">
     <span id="ok">✅ Капча решена! Скопируй код и отправь боту:</span>
@@ -72,31 +73,56 @@
       document.getElementById('token').value = token;
       document.getElementById('ok').style.display = 'block';
       document.getElementById('out').style.display = 'flex';
-      setStatus('капча решена ✓ (rqdata передан в render)', true);
+      document.getElementById('solve').style.display = 'none';
+      setStatus('капча решена ✓ (токен привязан к rqdata)', true);
     };
     window.onExpire = function () { showError('Капча истекла — обнови страницу и реши заново.'); };
 
+    var WIDGET_ID = null;
+
     // Вызовется, когда hCaptcha API готов (?onload=onHcaptchaLoad).
-    // КЛЮЧЕВОЙ МОМЕНТ для Riot (hCaptcha Enterprise): rqdata нужно передать
-    // ПРЯМО в hcaptcha.render() как параметр — тогда оно «зашивается» в виджет
-    // до решения. Старый путь hcaptcha.setData() для enterprise-rqdata
-    // ненадёжен, поэтому Riot и не принимал токен.
+    // КЛЮЧЕВОЙ МОМЕНТ для Riot (hCaptcha Enterprise): rqdata передаётся НЕ в
+    // render(), а в execute(id, { rqdata }). Поэтому рендерим НЕВИДИМЫЙ виджет
+    // (size:'invisible') и сами запускаем челлендж через execute() с rqdata —
+    // тогда токен привязывается к rqdata, и Riot его принимает. Если кликать по
+    // обычной галочке, hCaptcha вызывает execute() сам, БЕЗ нашего rqdata —
+    // именно из-за этого прошлые версии не работали.
     window.onHcaptchaLoad = function () {
       try {
-        hcaptcha.render('capwrap', {
+        WIDGET_ID = hcaptcha.render('capwrap', {
           sitekey: P.sitekey,
+          size: 'invisible',
           theme: 'dark',
-          rqdata: P.rqdata,            // <-- enterprise rqdata
           callback: 'onSolve',
           'expired-callback': 'onExpire',
           'error-callback': 'onCapError',
         });
-        setStatus('rqdata (' + P.rqdata.length + ' симв.) передан в render ✓ — реши капчу', true);
+        var btn = document.getElementById('solve');
+        btn.style.display = 'inline-block';
+        btn.onclick = runChallenge;
+        setStatus('готово — нажми «Решить капчу» (rqdata ' + P.rqdata.length + ' симв.)', true);
       } catch (e) {
         setStatus('ошибка render: ' + e.message, false);
         showError('Не удалось отрисовать капчу: ' + e.message + '. Обнови страницу.');
       }
     };
+
+    // Запуск enterprise-челленджа с привязкой rqdata.
+    function runChallenge() {
+      setStatus('запускаю капчу с rqdata…', true);
+      try {
+        // async:true -> промис с { response: token, key }. Это и есть rqdata-токен.
+        var p = hcaptcha.execute(WIDGET_ID, { rqdata: P.rqdata, async: true });
+        if (p && typeof p.then === 'function') {
+          p.then(function (res) { onSolve(res && res.response ? res.response : res); })
+           .catch(function (e) { onCapError(e && e.message ? e.message : String(e)); });
+        }
+        // если промис не вернулся — токен прилетит в callback onSolve
+      } catch (e) {
+        onCapError(e && e.message ? e.message : String(e));
+      }
+    }
+
     window.onCapError = function (err) {
       setStatus('hCaptcha error: ' + err, false);
       showError('hCaptcha вернул ошибку (' + err + '). Часто это VPN/блокировка — попробуй сменить сеть и обнови страницу.');
