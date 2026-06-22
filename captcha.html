@@ -67,53 +67,49 @@
       e.textContent = '⚠️ ' + m; e.style.display = 'block';
     }
 
-    // Глобальный колбэк успешного решения (auto-render зовёт его по имени из data-callback).
+    // Глобальный колбэк успешного решения.
     window.onSolve = function (token) {
       document.getElementById('token').value = token;
       document.getElementById('ok').style.display = 'block';
       document.getElementById('out').style.display = 'flex';
-      setStatus('капча решена ✓ (rqdata был привязан до решения)', true);
+      setStatus('капча решена ✓ (rqdata передан в render)', true);
     };
-
-    // Привязка rqdata к уже отрисованному виджету. Капризно — пробуем разные формы.
-    function bindRqdata() {
-      if (!window.hcaptcha) return false;
-      try { hcaptcha.setData('', { rqdata: P.rqdata }); return true; } catch (e) {}
-      try { hcaptcha.setData({ rqdata: P.rqdata }); return true; } catch (e) {}
-      return false;
-    }
+    window.onExpire = function () { showError('Капча истекла — обнови страницу и реши заново.'); };
 
     // Вызовется, когда hCaptcha API готов (?onload=onHcaptchaLoad).
+    // КЛЮЧЕВОЙ МОМЕНТ для Riot (hCaptcha Enterprise): rqdata нужно передать
+    // ПРЯМО в hcaptcha.render() как параметр — тогда оно «зашивается» в виджет
+    // до решения. Старый путь hcaptcha.setData() для enterprise-rqdata
+    // ненадёжен, поэтому Riot и не принимал токен.
     window.onHcaptchaLoad = function () {
-      // Привязываем rqdata сразу и затем ещё несколько раз в первые ~3 сек —
-      // чтобы оно легло на готовый виджет ДО того, как пользователь решит капчу.
-      var ok = bindRqdata();
-      var n = 0;
-      var iv = setInterval(function () {
-        bindRqdata();
-        if (++n >= 12) clearInterval(iv);
-      }, 250);
-      setStatus('rqdata (' + (P.rqdata ? P.rqdata.length : 0) + ' симв.) привязываю к виджету…' + (ok ? ' ✓' : ''), true);
+      try {
+        hcaptcha.render('capwrap', {
+          sitekey: P.sitekey,
+          theme: 'dark',
+          rqdata: P.rqdata,            // <-- enterprise rqdata
+          callback: 'onSolve',
+          'expired-callback': 'onExpire',
+          'error-callback': 'onCapError',
+        });
+        setStatus('rqdata (' + P.rqdata.length + ' симв.) передан в render ✓ — реши капчу', true);
+      } catch (e) {
+        setStatus('ошибка render: ' + e.message, false);
+        showError('Не удалось отрисовать капчу: ' + e.message + '. Обнови страницу.');
+      }
+    };
+    window.onCapError = function (err) {
+      setStatus('hCaptcha error: ' + err, false);
+      showError('hCaptcha вернул ошибку (' + err + '). Часто это VPN/блокировка — попробуй сменить сеть и обнови страницу.');
     };
 
-    // --- старт: создаём виджет с нужным sitekey, затем грузим api.js (auto-render) ---
+    // --- старт: грузим api.js в explicit-режиме, рендерим сами в onHcaptchaLoad ---
     (function start() {
       if (!P.sitekey) { setStatus('НЕТ sitekey в ссылке', false); showError('Открой ссылку от бота целиком (в ней есть #sitekey=...&rqdata=...).'); return; }
       if (!P.rqdata) { setStatus('НЕТ rqdata в ссылке', false); showError('В ссылке нет rqdata — без него Riot капчу не примет. Скопируй ссылку от бота целиком.'); return; }
 
-      var d = document.createElement('div');
-      d.className = 'h-captcha';
-      d.setAttribute('data-sitekey', P.sitekey);
-      d.setAttribute('data-theme', 'dark');
-      d.setAttribute('data-callback', 'onSolve');
-      d.setAttribute('data-expired-callback', 'onExpire');
-      document.getElementById('capwrap').appendChild(d);
-
-      window.onExpire = function () { showError('Капча истекла — обнови страницу и реши заново.'); };
-
-      // auto-render: api.js сам отрисует .h-captcha при загрузке; onload даёт момент, когда API готов.
+      // render=explicit — api.js НЕ рендерит сам, ждёт нашего hcaptcha.render() с rqdata.
       var s = document.createElement('script');
-      s.src = 'https://js.hcaptcha.com/1/api.js?onload=onHcaptchaLoad';
+      s.src = 'https://js.hcaptcha.com/1/api.js?render=explicit&onload=onHcaptchaLoad';
       s.async = true; s.defer = true;
       s.onerror = function () { setStatus('не загрузился hCaptcha', false); showError('Не удалось загрузить hCaptcha. Проверь интернет/VPN и обнови страницу.'); };
       document.head.appendChild(s);
