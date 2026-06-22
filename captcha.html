@@ -1,0 +1,110 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1" />
+  <title>Капча Riot</title>
+  <!-- Рендерим hCaptcha вручную: render=explicit + onload-колбэк -->
+  <script src="https://js.hcaptcha.com/1/api.js?render=explicit&onload=onHcaptchaLoad" async defer></script>
+  <style>
+    @import url("https://fonts.googleapis.com/css2?family=Roboto:wght@400;700&display=swap");
+    body {
+      font-family: Roboto, system-ui, sans-serif;
+      margin: 0; min-height: 100vh;
+      background: #1f2937; color: #f9faf8;
+      display: flex; flex-direction: column; align-items: center;
+      justify-content: center; text-align: center; gap: 24px; padding: 24px;
+    }
+    h1 { margin: 0; font-size: 22px; }
+    p { margin: 0; color: #cbd5e1; max-width: 420px; line-height: 1.5; }
+    .h-captcha { min-height: 94px; }
+    #out { display: none; flex-direction: column; gap: 12px; width: 100%; max-width: 440px; align-items: center; }
+    textarea {
+      width: 100%; height: 110px; box-sizing: border-box;
+      background: #111827; color: #a7f3d0; border: 1px solid #374151;
+      border-radius: 10px; padding: 12px; font-family: monospace; font-size: 12px;
+      resize: none;
+    }
+    button {
+      background: #047857; color: #f9faf8; border: none;
+      padding: 12px 22px; border-radius: 10px; font-size: 16px; cursor: pointer;
+      transition: background-color .2s ease;
+    }
+    button:hover { background: #065f46; }
+    #err { color: #fca5a5; display: none; }
+    #ok { color: #6ee7b7; font-weight: 700; display: none; }
+  </style>
+</head>
+<body>
+  <h1>🔐 Реши капчу Riot</h1>
+  <p>Отметь галочку (и реши задание, если попросит). Затем скопируй появившийся код и пришли его боту в Telegram.</p>
+
+  <div id="cap"></div>
+
+  <div id="out">
+    <span id="ok">✅ Капча решена! Скопируй код ниже и отправь боту:</span>
+    <textarea id="token" readonly></textarea>
+    <button id="copy">📋 Скопировать код</button>
+  </div>
+
+  <p id="err"></p>
+
+  <script>
+    function params() {
+      // Параметры приходят в #hash (не в query) — так они не попадают в логи/реферер.
+      return new URLSearchParams(location.hash.slice(1));
+    }
+
+    function showError(msg) {
+      var e = document.getElementById('err');
+      e.textContent = '⚠️ ' + msg;
+      e.style.display = 'block';
+    }
+
+    function onSolve(token) {
+      document.getElementById('token').value = token;
+      document.getElementById('ok').style.display = 'block';
+      document.getElementById('out').style.display = 'flex';
+    }
+
+    // Вызывается, когда загрузился скрипт hCaptcha.
+    window.onHcaptchaLoad = function () {
+      var p = params();
+      var sitekey = p.get('sitekey');
+      var rqdata = p.get('rqdata');
+      if (!sitekey) {
+        showError('Ссылка неполная (нет sitekey). Открой ссылку, которую прислал бот, целиком.');
+        return;
+      }
+      try {
+        var id = hcaptcha.render('cap', {
+          sitekey: sitekey,
+          theme: 'dark',
+          callback: onSolve,
+          'error-callback': function () { showError('Ошибка hCaptcha. Обнови страницу и попробуй ещё раз.'); },
+          'expired-callback': function () { showError('Капча истекла. Обнови страницу.'); }
+        });
+        // rqdata — challenge от Riot, привязывает капчу к конкретной попытке входа.
+        if (rqdata) hcaptcha.setData(id, { rqdata: rqdata });
+      } catch (e) {
+        showError('Не удалось показать капчу: ' + e.message);
+      }
+    };
+
+    document.getElementById('copy').onclick = function () {
+      var ta = document.getElementById('token');
+      ta.select();
+      var done = function () {
+        var b = document.getElementById('copy');
+        b.textContent = '✅ Скопировано';
+        setTimeout(function () { b.textContent = '📋 Скопировать код'; }, 1500);
+      };
+      if (navigator.clipboard) {
+        navigator.clipboard.writeText(ta.value).then(done, function () { document.execCommand('copy'); done(); });
+      } else {
+        document.execCommand('copy'); done();
+      }
+    };
+  </script>
+</body>
+</html>
