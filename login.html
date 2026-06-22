@@ -1,0 +1,113 @@
+<!DOCTYPE html>
+<html lang="ru">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover" />
+  <title>Вход в Valorant</title>
+  <script src="https://telegram.org/js/telegram-web-app.js"></script>
+  <style>
+    :root { color-scheme: dark; }
+    body {
+      font-family: system-ui, "Segoe UI", Roboto, sans-serif;
+      margin: 0; padding: 20px; box-sizing: border-box;
+      background: var(--tg-theme-bg-color, #17212b);
+      color: var(--tg-theme-text-color, #f5f5f5);
+      display: flex; flex-direction: column; gap: 16px; min-height: 100vh;
+    }
+    h1 { font-size: 20px; margin: 0; }
+    p { margin: 0; color: var(--tg-theme-hint-color, #aab8c2); line-height: 1.5; font-size: 14px; }
+    .step { background: rgba(255,255,255,.05); border-radius: 12px; padding: 14px; display: flex; flex-direction: column; gap: 10px; }
+    .num { font-weight: 700; color: var(--tg-theme-link-color, #6ab3f3); }
+    button {
+      border: none; border-radius: 10px; padding: 13px 16px; font-size: 15px; cursor: pointer;
+      background: var(--tg-theme-button-color, #3390ec); color: var(--tg-theme-button-text-color, #fff);
+      font-weight: 600;
+    }
+    button.secondary { background: rgba(255,255,255,.12); color: var(--tg-theme-text-color, #f5f5f5); }
+    textarea {
+      width: 100%; box-sizing: border-box; min-height: 84px; resize: vertical;
+      background: rgba(0,0,0,.25); color: #e7f0ff; border: 1px solid rgba(255,255,255,.15);
+      border-radius: 10px; padding: 10px; font-family: monospace; font-size: 12px;
+    }
+    #msg { font-size: 13px; min-height: 18px; }
+    #msg.bad { color: #ff8a8a; } #msg.ok { color: #7ee29a; }
+  </style>
+</head>
+<body>
+  <h1>🔐 Вход в Valorant</h1>
+  <p>Вход на настоящем сайте Riot. Бот не видит твой пароль — он получает только токен доступа.</p>
+
+  <div class="step">
+    <div><span class="num">1.</span> Открой страницу входа Riot и войди в свой аккаунт (логин, пароль, капча если попросит).</div>
+    <button id="open">🌐 Открыть вход Riot</button>
+  </div>
+
+  <div class="step">
+    <div><span class="num">2.</span> После входа окажешься на пустой странице <b>playvalorant.com/opt_in</b>. Скопируй <b>весь адрес</b> из строки браузера и вставь сюда.</div>
+    <button id="paste" class="secondary">📋 Вставить из буфера</button>
+    <textarea id="url" placeholder="https://playvalorant.com/opt_in#access_token=..."></textarea>
+  </div>
+
+  <button id="go">✅ Войти</button>
+  <div id="msg"></div>
+
+  <script>
+    var tg = window.Telegram && window.Telegram.WebApp;
+    if (tg) { tg.ready(); tg.expand(); }
+
+    var AUTH_URL =
+      'https://auth.riotgames.com/authorize' +
+      '?redirect_uri=https%3A%2F%2Fplayvalorant.com%2Fopt_in' +
+      '&client_id=play-valorant-web-prod&response_type=token%20id_token&nonce=1&scope=account%20openid';
+
+    function setMsg(t, kind) {
+      var m = document.getElementById('msg');
+      m.textContent = t || ''; m.className = kind || '';
+    }
+
+    // Открываем вход Riot во внешнем браузере — там удобно скопировать адрес.
+    document.getElementById('open').onclick = function () {
+      if (tg && tg.openLink) tg.openLink(AUTH_URL, { try_instant_view: false });
+      else window.open(AUTH_URL, '_blank');
+      setMsg('Войди, потом вернись и вставь адрес из шага 2.', 'ok');
+    };
+
+    document.getElementById('paste').onclick = function () {
+      if (navigator.clipboard && navigator.clipboard.readText) {
+        navigator.clipboard.readText().then(function (t) {
+          document.getElementById('url').value = t; setMsg('Вставил. Жми «Войти».', 'ok');
+        }).catch(function () { setMsg('Не удалось прочитать буфер — вставь вручную (зажми поле → Вставить).', 'bad'); });
+      } else {
+        setMsg('Браузер не даёт доступ к буферу — вставь вручную.', 'bad');
+      }
+    };
+
+    function extractToken(text) {
+      if (!text) return null;
+      var t = text.trim();
+      // ищем access_token и в #, и в ?, и в «голой» строке
+      var idx = t.indexOf('access_token=');
+      if (idx === -1) return null;
+      var frag = t.indexOf('#') !== -1 ? t.slice(t.indexOf('#') + 1) : t.slice(idx);
+      // если перед access_token был '?', берём всё после первого '?'/'#'
+      return frag;
+    }
+
+    document.getElementById('go').onclick = function () {
+      var raw = document.getElementById('url').value;
+      var frag = extractToken(raw);
+      if (!frag) {
+        setMsg('В адресе нет access_token. Скопируй адрес целиком после входа.', 'bad');
+        return;
+      }
+      setMsg('Отправляю боту…', 'ok');
+      if (tg && tg.sendData) {
+        tg.sendData(raw.trim());   // бот сам распарсит access_token/id_token
+        tg.close();
+      } else {
+        setMsg('Открой эту страницу через кнопку бота, а не в обычном браузере.', 'bad');
+      }
+    };
+  </script>
+</body>
+</html>
